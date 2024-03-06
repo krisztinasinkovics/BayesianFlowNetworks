@@ -213,7 +213,7 @@ class BFNDiscrete(nn.Module):
             return p_out
             
 
-    def continuous_loss_for_discrete_data(self, x:torch.Tensor):
+    def continuous_time_loss_for_discrete_data(self, x:torch.Tensor):
             B = x.shape[0]
             #print(f'input x: {x.shape}')
             # Sample t~U(0, 1)

@@ -90,13 +90,14 @@ class DiscreteBFNTrainer():
             epoch_losses = []
 
             # run through training batches
-            for _, batch_Xy in enumerate(self.train_dts): 
+            for bi, batch_Xy in enumerate(self.train_dts): 
+                print(f"Epoch {i+1}/{num_epochs}, Batch {bi+1}/{len(self.train_dts)}")
                 batch = batch_Xy[0] # train_dts returns a tuple (inputs, targets), we only use inputs
 
                 self.optim.zero_grad()
 
                 # model inference
-                loss = self.bfn_model.continuous_loss_for_discrete_data(batch.to(self.device))
+                loss = self.bfn_model.continuous_time_loss_for_discrete_data(batch.to(self.device))
 
                 loss.backward()
                 # clip grads
@@ -134,9 +135,10 @@ class DiscreteBFNTrainer():
         self.bfn_model.eval()
         val_losses = []
 
-        for _, batch in enumerate(self.val_dts):
+        for _, batch_Xy in enumerate(self.val_dts):
+            batch = batch_Xy[0] 
 
-            loss = self.bfn_model.continuous_time_loss_for_discretised_data(batch.to(self.device))
+            loss = self.bfn_model.continuous_time_loss_for_discrete_data(batch.to(self.device))
             val_losses.append(loss.item())
 
         if self.wandb_project_name is not None:
@@ -149,7 +151,7 @@ class DiscreteBFNTrainer():
         
         # Generate samples and priors
         with self.ema.average_parameters():
-            samples, priors = self.bfn_model.sample_generation_for_discretised_data(sample_shape=sample_shape)
+            samples, priors = self.bfn_model.sample(batch_size=8, n_steps=10)
             samples = samples.to(torch.float32)
         
         image_grid = get_image_grid_from_tensor(samples)
