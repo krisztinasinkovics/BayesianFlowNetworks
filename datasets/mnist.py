@@ -46,9 +46,9 @@ def collate_dynamic_binarize(batch: list[tuple[torch.Tensor, int]]) -> tuple[tor
 # Create the dynamically binarized MNIST dataset
 def get_mnist_datasets(root='./datasets/') -> tuple[Dataset, Dataset, Dataset]:
     # create datasets, train and val are the same (apart from transform), test is official cifar10 test set
-    train_set = DynamicallyBinarizedMNIST(root=root, train=True, download=True, transform=get_basic_transform(train=True))
-    val_set = DynamicallyBinarizedMNIST(root=root, train=True, download=True, transform=get_basic_transform(train=False))
-    test_set = DynamicallyBinarizedMNIST(root=root, train=False, download=True, transform=get_basic_transform(train=False))
+    train_set = DynamicallyBinarizedMNIST(root=root, train=True, download=True) # transform=get_basic_transform(train=True)
+    val_set = DynamicallyBinarizedMNIST(root=root, train=True, download=True) # transform=get_basic_transform(train=False)
+    test_set = DynamicallyBinarizedMNIST(root=root, train=False, download=True) # transform=get_basic_transform(train=False)
     return train_set, val_set, test_set
 
 
