@@ -19,10 +19,8 @@ class DiscreteBFNTrainer():
                  device: str = None,
                  bs: int = 32,
                  num_epochs: int = 10,
-                 input_height: int = 32,
-                 input_channels: int = 3,
-                #  input_height: int = 28, # 32 for cifar
-                #  input_channels: int = 1, # 3 for cifar
+                 input_height: int = 28, # 32 for cifar
+                 input_channels: int = 1, # 3 for cifar
                 #  add_pos_feats: bool = False,
                 #  output_height: int = 2,
                  lr: float = 0.0002,
@@ -33,7 +31,7 @@ class DiscreteBFNTrainer():
                  dataset: str = 'mnist',
                  wandb_project_name: str = "bfn",
                  checkpoint_file: str = None,
-                 checkpoint_save_path: str = '/home/rfsm2/rds/hpc-work/MLMI4/bfn_model_checkpoint'):
+                 checkpoint_save_path: str = './bfn_model_checkpoint'):
        
         self.K = K
         self.device = device
@@ -85,7 +83,7 @@ class DiscreteBFNTrainer():
         # init optimizer
         if optimizer is None:
             self.optim = AdamW(self.bfn_model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
-        steps_per_epoch = len(self.train_dls) 
+        steps_per_epoch = len(self.train_dts) 
         total_steps = self.num_epochs * steps_per_epoch
         # self.lr_sched = OneCycleLR(self.optim, max_lr, total_steps=total_steps, pct_start=0.001)
 
@@ -209,7 +207,6 @@ class DiscreteBFNTrainer():
         with self.ema.average_parameters():
             samples = self.bfn_model.sample(sample_shape=sample_shape, n_steps=n_steps)
             samples = samples.to(torch.float32)
-        
         image_grid = get_image_grid_from_tensor(samples.transpose(1, 3)) #samples
         # Convert samples to numpy arrays
         image_grid = image_grid.detach().numpy()
@@ -222,7 +219,7 @@ class DiscreteBFNTrainer():
             wandb.log({"image_samples": images})
 
     
-    def save_model(self, save_path: str = './'):
+    def save_model(self, save_path: str = './bfn_model_checkpoint'):
         self.bfn_model.eval()
 
         checkpoint = { 

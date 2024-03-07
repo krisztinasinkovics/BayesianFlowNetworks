@@ -1,3 +1,5 @@
 **/__pycache__/
 data/
 **/DynamicallyBinarizedMNIST/
+bfn/__pycache__/bfn_discrete.cpython-311.pyc
+bfn_model_checkpoint.pth

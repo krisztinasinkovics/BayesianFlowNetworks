@@ -252,7 +252,7 @@ class BFNDiscrete(nn.Module):
 
             # prior theta
             batch_size=sample_shape[0]
-            dim_flattened = np.sum(sample_shape[1:]) # aka D
+            dim_flattened = np.prod(sample_shape[1:]) # aka D
             theta = torch.ones(size=(batch_size, dim_flattened, self.K), device=device) / self.K # (batch_size, D, K)
 
             # generation loop
