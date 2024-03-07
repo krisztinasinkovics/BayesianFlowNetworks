@@ -123,7 +123,6 @@ class DiscreteBFNTrainer():
 
             # run through training batches
             for bi, batch_Xy in enumerate(self.train_dts): 
-                print(f"Epoch {i+1}/{num_epochs}, Batch {bi+1}/{len(self.train_dts)}")
                 batch = batch_Xy[0] # train_dts returns a tuple (inputs, targets), we only use inputs
 
                 if n_test_batches != 0:
