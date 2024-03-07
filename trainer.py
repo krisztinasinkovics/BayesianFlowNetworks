@@ -205,7 +205,7 @@ class DiscreteBFNTrainer():
         
         # Generate samples and priors
         with self.ema.average_parameters():
-            samples = self.bfn_model.sample(sample_shape=sample_shape, n_steps=n_steps)
+            samples = self.bfn_model.sample(sample_shape=sample_shape, n_steps=n_steps, device=self.device)
             samples = samples.to(torch.float32)
         image_grid = get_image_grid_from_tensor(samples.transpose(1, 3)) #samples
         # Convert samples to numpy arrays
