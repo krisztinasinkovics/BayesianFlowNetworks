@@ -19,12 +19,10 @@ class DiscreteBFNTrainer():
                  device: str = None,
                  bs: int = 32,
                  num_epochs: int = 10,
-                 input_height: int = 28, # 32 for cifar
-                 input_channels: int = 1, # 3 for cifar
-                #  add_pos_feats: bool = False,
-                #  output_height: int = 2,
-                 lr: float = 0.0002,
-                 betas: tuple = (0.9, 0.99),
+                #  input_height: int = 28, # 32 for cifar
+                #  input_channels: int = 1, # 3 for cifar
+                 lr: float = 0.0001,
+                 betas: tuple = (0.9, 0.98),
                  weight_decay: float = 0.01,
                  model: Union[None, nn.Module] = None,
                  optimizer: Union[None, torch.optim.Optimizer] = None,
@@ -50,7 +48,7 @@ class DiscreteBFNTrainer():
 
         # load dataset
         if dataset == 'mnist':
-            self.train_dts, self.val_dts, self.test_dts = get_mnist_dataloaders()
+            self.train_dts, self.val_dts, self.test_dts = get_mnist_dataloaders(batch_size=bs, root='./datasets/')
         else:
             raise ValueError(f"Dataset {dataset} not supported")
         
@@ -147,7 +145,7 @@ class DiscreteBFNTrainer():
                 # logging
                 if self.wandb_project_name is not None:
                     wandb.log({"batch_train_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
-                print(f"Epoch {i+1}/{num_epochs}, Loss: {torch.mean(torch.tensor(epoch_losses))}")
+                #print(f"Epoch {i+1}/{num_epochs}, Loss: {torch.mean(torch.tensor(epoch_losses))}")
 
                 epoch_losses.append(loss.item())
 
