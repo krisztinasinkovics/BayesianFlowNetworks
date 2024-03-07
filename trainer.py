@@ -209,7 +209,7 @@ class DiscreteBFNTrainer():
             samples = samples.to(torch.float32)
         image_grid = get_image_grid_from_tensor(samples.transpose(1, 3)) #samples
         # Convert samples to numpy arrays
-        image_grid = image_grid.detach().numpy()
+        image_grid = image_grid.detach().cpu().numpy()
         image_grid = np.transpose(image_grid, (2, 1, 0))
         # priors_np = priors.detach().numpy()
         
