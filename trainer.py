@@ -18,6 +18,9 @@ class DiscreteBFNTrainer():
                  K:int = 2,
                  device: str = None,
                  bs: int = 32,
+                 num_epochs: int = 10,
+                 input_height: int = 32,
+                 input_channels: int = 3,
                 #  input_height: int = 28, # 32 for cifar
                 #  input_channels: int = 1, # 3 for cifar
                 #  add_pos_feats: bool = False,
@@ -28,12 +31,20 @@ class DiscreteBFNTrainer():
                  model: Union[None, nn.Module] = None,
                  optimizer: Union[None, torch.optim.Optimizer] = None,
                  dataset: str = 'mnist',
-                 wandb_project_name: str = "bfn"):
+                 wandb_project_name: str = "bfn",
+                 checkpoint_file: str = None,
+                 checkpoint_save_path: str = '/home/rfsm2/rds/hpc-work/MLMI4/bfn_model_checkpoint'):
        
         self.K = K
         self.device = device
         # self.input_height = input_height
         # self.input_channels = input_channels
+        self.best_val_loss = torch.tensor(float('inf'))
+        self.step = 0
+        self.epoch = 0
+        self.num_epochs = num_epochs
+        self.checkpoint_save_path = checkpoint_save_path
+
         if device is None:
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         else:
@@ -71,21 +82,44 @@ class DiscreteBFNTrainer():
         # init BFN model
         self.bfn_model = BFNDiscrete(K=K, model=self.net).to(self.device)
 
-        # init ema
-        self.ema = ExponentialMovingAverage(self.bfn_model.parameters(), decay=0.9999)
-
         # init optimizer
         if optimizer is None:
             self.optim = AdamW(self.bfn_model.parameters(), lr=lr, betas=betas, weight_decay=weight_decay)
+        steps_per_epoch = len(self.train_dls) 
+        total_steps = self.num_epochs * steps_per_epoch
+        # self.lr_sched = OneCycleLR(self.optim, max_lr, total_steps=total_steps, pct_start=0.001)
+
+        # load checkpoint if provided
+        if checkpoint_file is not None:
+            # Load checkpoint
+            checkpoint = torch.load(checkpoint_file)
+            # Load each part
+            self.bfn_model.load_state_dict(checkpoint['model'])
+            # self.lr_sched = checkpoint['lr_sched']
+            self.optim.load_state_dict(checkpoint['optim'])
+            self.step = checkpoint['step']
+            self.epoch = checkpoint['epoch']
+            print(f'Loaded pretrained model checkpoint {checkpoint_file}')
+
+        # init ema
+        self.ema = ExponentialMovingAverage(self.bfn_model.parameters(), decay=0.9999)
 
         self.wandb_project_name = wandb_project_name
         if wandb_project_name is not None:
             wandb.init(project=wandb_project_name)
 
 
-    def train(self, num_epochs: int = 10, validation_interval: int = 1, sampling_interval: int = 10, clip_grad: float = 2.0):
+    def train(self,
+              num_epochs: int = None,
+              validation_interval_epoch: int = 1,
+              sampling_interval_step: int = 250,
+              save_checkpoint_interval_step: int = 100,
+              clip_grad: float = 2.0,
+              n_test_batches: int = 0):
         
-
+        if num_epochs is None:
+            num_epochs = self.num_epochs
+        
         for i in range(num_epochs):
             epoch_losses = []
 
@@ -93,6 +127,11 @@ class DiscreteBFNTrainer():
             for bi, batch_Xy in enumerate(self.train_dts): 
                 print(f"Epoch {i+1}/{num_epochs}, Batch {bi+1}/{len(self.train_dts)}")
                 batch = batch_Xy[0] # train_dts returns a tuple (inputs, targets), we only use inputs
+
+                if n_test_batches != 0:
+                    if bi > n_test_batches:
+                        break
+
 
                 self.optim.zero_grad()
 
@@ -110,22 +149,31 @@ class DiscreteBFNTrainer():
 
                 # logging
                 if self.wandb_project_name is not None:
-                    wandb.log({"batch_train_loss": loss.item()})
-                    print(f"Epoch {i+1}/{num_epochs}, Batch {i+1}/{len(self.train_dts)}, Loss: {loss.item()}")
+                    wandb.log({"batch_train_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
+                print(f"Epoch {i+1}/{num_epochs}, Loss: {torch.mean(torch.tensor(epoch_losses))}")
 
                 epoch_losses.append(loss.item())
 
+                # Sampling stage
+                if self.step % sampling_interval_step == 0:
+                    self.sample()
+
+                if self.step % save_checkpoint_interval_step == 0:
+                    self.save_model(save_path=self.checkpoint_save_path)
+
+                # for every batch iterate
+                self.step += 1
+
+
             if self.wandb_project_name is not None:
                 wandb.log({"epoch_train_loss": torch.mean(torch.tensor(epoch_losses))})
-                print(f"Epoch {i+1}/{num_epochs}, Loss: {torch.mean(torch.tensor(epoch_losses))}")
+            print(f"Epoch {i+1}/{num_epochs}, Loss: {torch.mean(torch.tensor(epoch_losses))}")
 
             # Validation check
-            if (i + 1) % validation_interval == 0:
+            if i % validation_interval_epoch == 0:
                 self.validate()
 
-            # Sampling stage
-            if (i + 1) % sampling_interval == 0:
-                self.sample()
+        self.epoch += 1 
                 
             
 
@@ -144,18 +192,26 @@ class DiscreteBFNTrainer():
         if self.wandb_project_name is not None:
             wandb.log({"validation_loss": torch.mean(torch.tensor(val_losses))})
 
+        epoch_val_loss = torch.mean(torch.tensor(val_losses))
+        if self.wandb_project_name is not None:
+            wandb.log({"validation_loss": epoch_val_loss})
+
+        if epoch_val_loss < self.best_val_loss:
+            self.best_val_loss = epoch_val_loss
+            self.save_model(save_path=self.checkpoint_save_path+'best_val')
+
 
     @torch.inference_mode()
-    def sample(self, sample_shape = (8, 28, 28, 1)):
+    def sample(self, sample_shape = (8, 28, 28, 1), n_steps=100):
         self.bfn_model.eval()
         
         # Generate samples and priors
         with self.ema.average_parameters():
-            samples, priors = self.bfn_model.sample(batch_size=8, n_steps=10)
+            samples = self.bfn_model.sample(sample_shape=sample_shape, n_steps=n_steps)
             samples = samples.to(torch.float32)
         
-        image_grid = get_image_grid_from_tensor(samples)
-        # Convert samples and priors to numpy arrays
+        image_grid = get_image_grid_from_tensor(samples.transpose(1, 3)) #samples
+        # Convert samples to numpy arrays
         image_grid = image_grid.detach().numpy()
         image_grid = np.transpose(image_grid, (2, 1, 0))
         # priors_np = priors.detach().numpy()
@@ -165,4 +221,17 @@ class DiscreteBFNTrainer():
             images = wandb.Image(image_grid, caption="MNIST - Sampled Images from BFN")
             wandb.log({"image_samples": images})
 
-        
+    
+    def save_model(self, save_path: str = './'):
+        self.bfn_model.eval()
+
+        checkpoint = { 
+            'epoch': self.epoch,
+            'step': self.step,
+            'model': self.bfn_model.state_dict(),
+            'optim': self.optim.state_dict(),
+            }
+        # 'lr_sched': self.lr_sched
+        save_path = save_path + '.pth'
+        print(save_path)
+        torch.save(checkpoint, save_path)

@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributions as D
 from torch import Tensor
+import numpy as np
 
 from bfn.bfn_utils import right_pad_dims_to
 
@@ -246,17 +247,19 @@ class BFNDiscrete(nn.Module):
         
 
     @torch.inference_mode()
-    def sample(self, batch_size:int, n_steps:int, device='cpu'):
+    def sample(self, sample_shape:tuple = (8, 28, 28, 1), n_steps:int=100, device='cpu'):
             self.eval()
 
             # prior theta
-            theta = torch.ones(size=(batch_size, self.D, self.K), device=device) / self.K # (batch_size, D, K)
+            batch_size=sample_shape[0]
+            dim_flattened = np.sum(sample_shape[1:]) # aka D
+            theta = torch.ones(size=(batch_size, dim_flattened, self.K), device=device) / self.K # (batch_size, D, K)
 
             # generation loop
             for i in range(1, n_steps):
                 # Calculate t
                 t = (i - 1)/n_steps # scalar
-                t = t * torch.ones((theta.shape[0],), device=theta.device, dtype=theta.dtype) # (batch_size,)
+                t = t * torch.ones((batch_size, dim_flattened), device=theta.device, dtype=theta.dtype) # (batch_size, D)
                 
                 # Calculate k
                 k_probs = self.discrete_output_distribution(theta, t)  # (B, D, K)
@@ -279,6 +282,8 @@ class BFNDiscrete(nn.Module):
             
             k_probs = self.discrete_output_distribution(theta, torch.ones_like(t))  # (B, D, K)
             k_output_sample = torch.distributions.Categorical(probs=k_probs).sample()
+            
+            k_output_sample = k_output_sample.view(sample_shape)
             
             return k_output_sample
             
