@@ -131,7 +131,7 @@ class DiscreteBFNTrainer():
                 self.optim.zero_grad()
 
                 # model inference
-                loss = self.bfn_model.continuous_time_loss_for_discrete_data(batch.to(self.device))
+                loss, loss_r = self.bfn_model.continuous_time_loss_for_discrete_data(batch.to(self.device))
 
                 loss.backward()
                 # clip grads
@@ -145,6 +145,7 @@ class DiscreteBFNTrainer():
                 # logging
                 if self.wandb_project_name is not None:
                     wandb.log({"batch_train_loss": loss.item(), "lr": self.optim.param_groups[0]['lr']})
+                    wandb.log({"batch_reconstruction_loss": loss_r.item(), "lr": self.optim.param_groups[0]['lr']})
                 #print(f"Epoch {i+1}/{num_epochs}, Loss: {torch.mean(torch.tensor(epoch_losses))}")
 
                 epoch_losses.append(loss.item())
@@ -177,15 +178,19 @@ class DiscreteBFNTrainer():
     def validate(self):
         self.bfn_model.eval()
         val_losses = []
+        val_reconstruction_losses = []
 
         for _, batch_Xy in enumerate(self.val_dts):
             batch = batch_Xy[0] 
 
-            loss = self.bfn_model.continuous_time_loss_for_discrete_data(batch.to(self.device))
+            loss, loss_r = self.bfn_model.continuous_time_loss_for_discrete_data(batch.to(self.device))
             val_losses.append(loss.item())
+            val_reconstruction_losses.append(loss_r.item())
 
         if self.wandb_project_name is not None:
             wandb.log({"validation_loss": torch.mean(torch.tensor(val_losses))})
+            wandb.log({"validation_reconstruction_loss": torch.mean(torch.tensor(val_reconstruction_losses))})
+        print(f'reconstruction loss: {torch.mean(torch.tensor(val_reconstruction_losses))}')
 
         epoch_val_loss = torch.mean(torch.tensor(val_losses))
         if self.wandb_project_name is not None:
@@ -212,7 +217,7 @@ class DiscreteBFNTrainer():
         
         # Plot histograms
         if self.wandb_project_name is not None:
-            images = wandb.Image(image_grid, caption="MNIST - Sampled Images from BFN")
+            images = wandb.Image(image_grid, caption="MNIST - Sampled Images from BFN"),
             wandb.log({"image_samples": images})
 
     
