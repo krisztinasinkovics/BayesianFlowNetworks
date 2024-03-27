@@ -53,6 +53,7 @@ class VanillaBFNDiscrete(nn.Module):
                                   If K>2, tensor shape is (B, D, K).
             """
             net_output = self.forward(theta, t) # (B, D, K)
+            print(f'net output = {net_output}')
 
             if self.K == 2:
                 po_1 = torch.sigmoid(net_output) # (B, D, K)
@@ -66,18 +67,20 @@ class VanillaBFNDiscrete(nn.Module):
             
 
     def training_continuous_loss(self, x:torch.Tensor):
-            B, D = x.shape
+            B = x.shape[0]
 
             # Sample t~U(0, 1)
             t = torch.rand((B,), device=x.device, dtype=torch.float32) # (B,)
+            t = right_pad_dims_to(t, x) # (B, D)
 
             # Calculate beta
-            beta = self.beta1 * (t**2) # (B,)
+            beta = self.beta1 * (t**2) # (B, D)
 
             # Sample y from p_sender N(beta*(K * e_x - 1), beta * K * I)
             e_x = F.one_hot(x, num_classes=self.K) # (B, D, K)
-            mean = beta.unsqueeze(-1).unsqueeze(-1) * (self.K * e_x.float() - 1) # (B, D, K);
-            std = (beta.unsqueeze(-1).unsqueeze(-1) * self.K).sqrt() # (B, D, K)
+            beta = right_pad_dims_to(beta, e_x) # (B, D, K)
+            mean = beta * (self.K * e_x.float() - 1) # (B, D, K);
+            std = (beta * self.K).sqrt() # (B, D, K)
             
             y = torch.distributions.Normal(mean, std).sample() # (B, D, K)
 
@@ -89,7 +92,8 @@ class VanillaBFNDiscrete(nn.Module):
 
             # Calculate coninuous Loss
             e_hat = p_output
-            Loss_infty = self.K * self.beta1 * t.unsqueeze(-1).unsqueeze(-1) * ((e_x - e_hat)**2) # (B, D, K)
+            print(e_hat)
+            Loss_infty = self.K * self.beta1 * t.unsqueeze(-1) * ((e_x - e_hat)**2) # (B, D, K)
 
             return Loss_infty.mean()
         
@@ -105,11 +109,11 @@ class VanillaBFNDiscrete(nn.Module):
             for i in range(1, n_steps):
                 # Calculate t
                 t = (i - 1)/n_steps # scalar
-                t = t * torch.ones((theta.shape[0],), device=theta.device, dtype=theta.dtype) # (batch_size,)
+                t = t * torch.ones((theta.shape[0], 1), device=theta.device, dtype=theta.dtype) # (batch_size, 1)
                 
                 # Calculate k
                 k_probs = self.discrete_output_distribution(theta, t)  # (B, D, K)
-                k = torch.distributions.Categorical(probs=k_probs).sample() # (B, D) # should we do Multinomial??
+                k = torch.distributions.Categorical(probs=k_probs).sample() # (B, D) 
 
                 # Calculate alpha
                 alpha = self.beta1 * ((2*i - 1) / n_steps**2) # scalar
@@ -130,6 +134,77 @@ class VanillaBFNDiscrete(nn.Module):
             k_output_sample = torch.distributions.Categorical(probs=k_probs).sample()
             
             return k_output_sample
+    
+
+    @torch.inference_mode()
+    def sample_for_simplex(self, batch_size:int, n_steps:int=100, device='cpu'):
+        self.eval()
+
+        # prior theta
+        theta = torch.ones(size=(batch_size, self.D, self.K), device=device) / self.K  # Uniform prior (batch_size, D, K)
+
+        theta_trajectory = []
+        beta_values = []
+        heatmap_data = []
+        t_values = []
+
+        theta_trajectory.append(theta[0].cpu().numpy())
+
+        for i in range(1, n_steps + 1):
+            t = (i - 1) / n_steps
+            t_tensor = t * torch.ones((theta.shape[0], 1), device=theta.device, dtype=theta.dtype) # (batch_size, 1)
+
+            # Store t values
+            t_values.append(t)
+
+            # Update theta and get output probabilities
+            k_probs = self.discrete_output_distribution(theta, t_tensor)  # (B, D, K)
+            k = torch.distributions.Categorical(probs=k_probs).sample()
+
+            
+            # Calculate alpha
+            alpha = self.beta1 * ((2*i - 1) / n_steps**2) # scalar
+
+            # Update beta and store beta values
+            beta_t = self.beta1 * t ** 2
+            beta_values.append(beta_t)
+
+            # Update alpha and sample y
+            e_k = F.one_hot(k, num_classes=self.K).float()
+            mean = alpha * (self.K * e_k -1) # (B, D, K)
+            var = (alpha * self.K)
+            std = torch.full_like(mean, fill_value=var, device=device).sqrt() # (B, D, K)
+            y = torch.distributions.Normal(mean, std).sample() # (B, D, K)
+
+            # Update theta and store trajectory
+            theta_prime = torch.exp(y) * theta
+            sum_theta_prime = theta_prime.sum(-1, keepdim=True)
+            theta = theta_prime / sum_theta_prime
+            theta_trajectory.append(theta[0].cpu().numpy())
+
+            # Compute p_output and store heatmap data
+            #p_output = self.discrete_output_distribution(theta, t_tensor)  # (B, D, K)
+            #if i == 1 or i % 10 == 0:  # Assuming you want to collect data at intervals of 10
+            heatmap_data.append(k_probs.cpu().numpy())  # probabilities for the heatmap
+
+        # The final output sample
+        final_t_tensor = torch.ones_like(t_tensor)
+        k_probs = self.discrete_output_distribution(theta, final_t_tensor)
+        k_output_sample = torch.distributions.Categorical(probs=k_probs).sample()
+
+
+        heatmap_data.append(k_probs.cpu().numpy()) 
+        t_values.append(1.0)
+        beta_values.append(self.beta1 * t ** 2)
+
+        # Convert lists to arrays for plotting
+        theta_trajectory = np.array(theta_trajectory)
+        beta_values = np.array(beta_values)
+        t_values = np.array(t_values)
+        heatmap_data = np.array(heatmap_data)
+
+
+        return k_output_sample, theta_trajectory, t_values, beta_values, heatmap_data
     
 
 
@@ -212,6 +287,9 @@ class BFNDiscrete(nn.Module):
                 p_out = torch.softmax(net_output, dim=-1) # (B, D, K)
 
             return p_out
+    
+    def reconstruction_loss(self, theta:torch.tensor, t:torch.tensor):
+         return self.discrete_output_distribution(theta, torch.ones_like(t))
             
 
     def continuous_time_loss_for_discrete_data(self, x:torch.Tensor):
@@ -242,9 +320,10 @@ class BFNDiscrete(nn.Module):
             t = right_pad_dims_to(t, e_hat) # (B, D, K)
 
             Loss_infty = self.K * self.beta1 * t * ((e_x - e_hat)**2) # (B, D, K)
+            Loss_r = self.reconstruction_loss(theta, t)
 
-            return Loss_infty.mean()
-        
+            return Loss_infty.mean(), Loss_r.mean()
+         
 
     @torch.inference_mode()
     def sample(self, sample_shape:tuple = (8, 28, 28, 1), n_steps:int=100, device='cpu'):
@@ -255,7 +334,7 @@ class BFNDiscrete(nn.Module):
             dim_flattened = np.prod(sample_shape[1:]) # aka D
             theta = torch.ones(size=(batch_size, dim_flattened, self.K), device=device) / self.K # (batch_size, D, K)
 
-            # generation loop
+            # generation loo[]
             for i in range(1, n_steps):
                 # Calculate t
                 t = (i - 1)/n_steps # scalar
@@ -286,9 +365,3 @@ class BFNDiscrete(nn.Module):
             k_output_sample = k_output_sample.view(sample_shape)
             
             return k_output_sample
-            
-
-
-
-
-    
